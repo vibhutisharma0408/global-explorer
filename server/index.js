@@ -68,48 +68,60 @@ app.get('/api/news/top', async (req, res) => {
   try {
     const { country, q, pageSize = 3 } = req.query
     const lang = 'en'
-    if (!NEWS_KEY) {
-      console.warn('[news] Missing NEWSAPI_KEY')
-      return res.status(200).json({ articles: [] })
-    }
-    // Try top-headlines by country first
-    if (country) {
-      try {
-        const { data } = await axios.get('https://newsapi.org/v2/top-headlines', {
-          params: { country, pageSize, language: lang, apiKey: NEWS_KEY },
-        })
-        if (data?.status === 'ok' && Array.isArray(data?.articles) && data.articles.length) {
-          return res.json({ articles: data.articles.map(a => ({ title: a.title, url: a.url })) })
-        }
-        console.log('[news] top-headlines returned 0, falling back to everything', { country })
-      } catch (e) {
-        console.log('[news] top-headlines error, falling back', e?.response?.data || e.message)
-        // fall through to everything
-      }
-    }
-    // Fallback: everything search with query
-    const query = q || country || 'world'
-    const { data } = await axios.get('https://newsapi.org/v2/everything', {
-      params: { q: query, sortBy: 'publishedAt', pageSize, language: lang, apiKey: NEWS_KEY },
-    })
-    let articles = Array.isArray(data?.articles)
-      ? data.articles.map(a => ({ title: a.title, url: a.url }))
-      : []
+    let articles = []
 
-    // Final fallback: Google News RSS scrape (no key)
+    // Try NewsAPI if key is available
+    if (NEWS_KEY) {
+      // Try top-headlines by country first
+      if (country) {
+        try {
+          const { data } = await axios.get('https://newsapi.org/v2/top-headlines', {
+            params: { country, pageSize, language: lang, apiKey: NEWS_KEY },
+          })
+          if (data?.status === 'ok' && Array.isArray(data?.articles) && data.articles.length) {
+            articles = data.articles.map(a => ({ title: a.title, url: a.url }))
+          } else {
+            console.log('[news] top-headlines returned 0, falling back to everything', { country })
+          }
+        } catch (e) {
+          console.log('[news] top-headlines error, falling back', e?.response?.data || e.message)
+        }
+      }
+
+      // Fallback: everything search with query
+      if (!articles.length) {
+        try {
+          const query = q || country || 'world'
+          const { data } = await axios.get('https://newsapi.org/v2/everything', {
+            params: { q: query, sortBy: 'publishedAt', pageSize, language: lang, apiKey: NEWS_KEY },
+          })
+          articles = Array.isArray(data?.articles)
+            ? data.articles.map(a => ({ title: a.title, url: a.url }))
+            : []
+        } catch (e) {
+          console.log('[news] everything API error', e?.response?.data || e.message)
+        }
+      }
+    } else {
+      console.warn('[news] Missing NEWSAPI_KEY, using RSS fallback')
+    }
+
+    // Final fallback: Google News RSS scrape (works without API key)
     if (!articles.length) {
       try {
+        const query = q || country || 'world'
         const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`
         const rss = await axios.get(rssUrl)
         const xml = String(rss.data)
         const items = []
         const regex = /<item>[\s\S]*?<title><!\[CDATA\[(.*?)\]\]><\/title>[\s\S]*?<link>(.*?)<\/link>[\s\S]*?<\/item>/g
         let m
-        while ((m = regex.exec(xml)) && items.length < 3) {
+        while ((m = regex.exec(xml)) && items.length < pageSize) {
           items.push({ title: m[1], url: m[2] })
         }
         if (items.length) {
           articles = items
+          console.log('[news] RSS fallback successful, found', items.length, 'articles')
         }
       } catch (rssErr) {
         console.log('[news] RSS fallback failed', rssErr.message)
