@@ -22,20 +22,31 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.get('/api/countries', async (_req, res) => {
-  const REST_BASE = 'https://restcountries.com/v3.1'
-  const fields = 'name,cca2,cca3,capital,region,subregion,population,area,flags,languages,currencies,borders,latlng'
   try {
-    // Try REST with fields
+    // Try local fallback first (has population data)
     try {
-      const { data } = await axios.get(`${REST_BASE}/all`, { params: { fields } })
-      return res.json(data)
-    } catch {}
-    // Try REST full
+      const local = await import('./src/data/countries_fallback.json', { with: { type: 'json' } })
+      const data = local.default || []
+      if (Array.isArray(data) && data.length) {
+        console.log('[countries] Using local fallback, found', data.length, 'countries with population data')
+        return res.json(data)
+      }
+    } catch (e) {
+      console.log('[countries] Local fallback failed:', e.message)
+    }
+
+    // Try REST Countries API (should have population)
     try {
-      const { data } = await axios.get(`${REST_BASE}/all`)
-      return res.json(data)
-    } catch {}
-    // Try mirrors
+      const { data } = await axios.get('https://restcountries.com/v3.1/all')
+      if (Array.isArray(data) && data.length) {
+        console.log('[countries] Using REST Countries API, found', data.length, 'countries')
+        return res.json(data)
+      }
+    } catch (e) {
+      console.log('[countries] REST Countries API failed:', e.message)
+    }
+
+    // Try mirrors (mledoze/countries dataset) - may not have population
     const mirrors = [
       'https://cdn.jsdelivr.net/gh/mledoze/countries@master/countries.json',
       'https://unpkg.com/mledoze-countries@latest/countries.json',
@@ -44,22 +55,31 @@ app.get('/api/countries', async (_req, res) => {
     for (const url of mirrors) {
       try {
         const { data } = await axios.get(url)
-        if (Array.isArray(data) && data.length) return res.json(data)
-      } catch {}
+        if (Array.isArray(data) && data.length) {
+          console.log('[countries] Using mirror dataset, found', data.length, 'countries')
+          return res.json(data)
+        }
+      } catch (e) {
+        console.log('[countries] Mirror failed:', url, e.message)
+      }
     }
-    // Try world-countries package (full dataset) if installed
+
+    // Try world-countries package (may not have population)
     try {
       const pkg = await import('world-countries')
       const list = (pkg.default || pkg) ?? []
-      if (Array.isArray(list) && list.length) return res.json(list)
-    } catch {}
-    // Local minimal fallback
-    try {
-      const local = await import('../src/data/countries_fallback.json', { assert: { type: 'json' } })
-      return res.json(local.default || [])
-    } catch {}
+      if (Array.isArray(list) && list.length) {
+        console.log('[countries] Using world-countries package, found', list.length, 'countries')
+        return res.json(list)
+      }
+    } catch (e) {
+      console.log('[countries] world-countries package failed:', e.message)
+    }
+
+    console.log('[countries] All data sources failed, returning empty array')
     return res.json([])
   } catch (e) {
+    console.log('[countries] Fatal error:', e.message)
     return res.json([])
   }
 })
