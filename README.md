@@ -1,6 +1,7 @@
 # Global Explorer
-
+DEPLOYED LINK - https://global-explorer-pxrw.vercel.app/
 A modern React application for exploring countries around the world with interactive maps, country details, news, and weather information.
+
 
 ## Features
 
